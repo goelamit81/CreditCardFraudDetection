@@ -1,0 +1,80 @@
+3. Script to calculate the moving average and standard deviation of the last 10 transactions 
+for each card_id for the data present in Hadoop and NoSQL database. If the total number of 
+transactions for a particular card_id is less than 10, then calculate the parameters based 
+on the total number of records available for that card_id. The script should be able to 
+extract and feed the other relevant data (‘postcode’, ‘transaction_dt’, ‘score’, etc.) for
+the look-up table along with card_id and UCL.
+ 
+-------------------------------- Hive Commands : Start -----------------------------------------------
+
+-- Create table ranked_card_transactions_orc to store last 10 transactions for each card_id
+
+CREATE TABLE IF NOT EXISTS RANKED_CARD_TRANSACTIONS_ORC(
+`CARD_ID` STRING,
+`AMOUNT` DOUBLE,
+`POSTCODE` STRING,
+`TRANSACTION_DT` TIMESTAMP,
+`RANK` INT)
+STORED AS ORC
+TBLPROPERTIES ("orc.compress"="SNAPPY");
+
+-- Create table card_ucl_orc to store UCL values for each card_id
+
+CREATE TABLE IF NOT EXISTS CARD_UCL_ORC(
+`CARD_ID` STRING,
+`UCL` DOUBLE)
+STORED AS ORC
+TBLPROPERTIES ("orc.compress"="SNAPPY");
+
+-- Load data in ranked_card_transactions_orc table
+
+INSERT OVERWRITE TABLE RANKED_CARD_TRANSACTIONS_ORC
+SELECT B.CARD_ID, B.AMOUNT, B.POSTCODE, B.TRANSACTION_DT, B.RANK FROM
+(SELECT A.CARD_ID, A.AMOUNT, A.POSTCODE, A.TRANSACTION_DT, RANK() OVER(PARTITION BY A.CARD_ID ORDER BY A.TRANSACTION_DT DESC, AMOUNT DESC) AS RANK FROM
+(SELECT CARD_ID, AMOUNT, POSTCODE, TRANSACTION_DT FROM CARD_TRANSACTIONS_HBASE WHERE
+STATUS = 'GENUINE') A ) B WHERE B.RANK <= 10;
+
+-- Load data in card_ucl_orc table
+
+INSERT OVERWRITE TABLE CARD_UCL_ORC
+SELECT A.CARD_ID, (A.AVERAGE + (3 * A.STANDARD_DEVIATION)) AS UCL FROM (
+SELECT CARD_ID, AVG(AMOUNT) AS AVERAGE, STDDEV(AMOUNT) AS STANDARD_DEVIATION FROM 
+RANKED_CARD_TRANSACTIONS_ORC
+GROUP BY CARD_ID) A;
+ 
+-- Load data in lookup_data_hbase table
+
+INSERT OVERWRITE TABLE LOOKUP_DATA_HBASE
+SELECT RCTO.CARD_ID, CUO.UCL, CMS.SCORE, RCTO.POSTCODE, RCTO.TRANSACTION_DT
+FROM  RANKED_CARD_TRANSACTIONS_ORC RCTO
+JOIN CARD_UCL_ORC CUO
+ON CUO.CARD_ID = RCTO.CARD_ID
+JOIN (
+SELECT DISTINCT CARD.CARD_ID, SCORE.SCORE
+FROM CARD_MEMBER_ORC CARD 
+JOIN MEMBER_SCORE_ORC SCORE 
+ON CARD.MEMBER_ID = SCORE.MEMBER_ID) AS CMS
+ON RCTO.CARD_ID = CMS.CARD_ID
+WHERE RCTO.RANK = 1;
+
+-- Verify count in lookup_data_hbase table
+
+select count(*) from lookup_data_hbase;
+
+-- Verify some data in lookup_data_hbase table 
+
+select * from lookup_data_hbase limit 10;
+
+-------------------------------- Hive Commands : End -----------------------------------------------
+
+-------------------------------- HBase Commands : Start -----------------------------------------------
+
+-- In HBase, check count in lookup_data_hive table
+
+count 'lookup_data_hive'
+
+-- In HBase, check data in lookup_data_hive table
+
+scan 'lookup_data_hive'
+
+-------------------------------- HBase Commands : End -----------------------------------------------
