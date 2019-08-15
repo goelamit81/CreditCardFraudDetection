@@ -1,0 +1,28 @@
+<coordinator-app name="capstone_proj_coord" start="${start}" end="${end}"
+frequency="${coord:hours(4)}" timezone="UTC" xmlns="uri:oozie:coordinator:0.2">
+	<controls>
+		<timeout>5</timeout>
+		<concurrency>1</concurrency>
+		<execution>FIFO</execution>
+		<throttle>5</throttle>
+	</controls>
+	<action>
+		<workflow>
+			<app-path>${workflowpath}</app-path>
+			<configuration>
+				<property>
+					<name>jobTracker</name>
+					<value>${jobTracker}</value>
+				</property>
+				<property>
+					<name>nameNode</name>
+					<value>${nameNode}</value>
+				</property>
+				<property>
+					<name>queueName</name>
+					<value>${queueName}</value>
+				</property>
+			</configuration>
+		</workflow>
+	</action>
+</coordinator-app>

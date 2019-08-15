@@ -1,0 +1,212 @@
+4. Script to set up a job scheduler to schedule the scripts run after every 4 hours.
+The job should take the data from the NoSQL database and AWS RDS and perform the 
+relevant analyses as per the rules and should feed the data in the look-up table.
+
+-------------------------------- Sqoop Commands : Start -----------------------------------------------
+
+## Start sqoop metastore
+
+sudo -u sqoop sqoop-metastore
+
+## Setup sqoop job to import card_member data incrementally from RDS into HDFS
+
+sqoop job --create extract_card_member --meta-connect jdbc:hsqldb:hsql://ip-172-31-91-95.ec2.internal:16000/sqoop -- import --connect jdbc:mysql://upgradawsrds.cpclxrkdvwmz.us-east-1.rds.amazonaws.com:3306/cred_financials_data --username upgraduser --password upgraduser --table card_member --null-string 'NA' --null-non-string '\\N' --incremental lastmodified --check-column member_joining_dt --last-value 0 --merge-key card_id --target-dir '/capstone_project/card_member'
+
+## Setup sqoop job to import member_score data from RDS into HDFS
+
+sqoop job --create extract_member_score --meta-connect jdbc:hsqldb:hsql://ip-172-31-91-95.ec2.internal:16000/sqoop -- import --connect jdbc:mysql://upgradawsrds.cpclxrkdvwmz.us-east-1.rds.amazonaws.com:3306/cred_financials_data --username upgraduser --password upgraduser --table member_score --null-string 'NA' --null-non-string '\\N' --delete-target-dir --target-dir '/capstone_project/member_score'
+
+## Verify sqoop jobs
+
+sqoop job --list --meta-connect jdbc:hsqldb:hsql://ip-172-31-91-95.ec2.internal:16000/sqoop
+
+sqoop job --show extract_card_member --meta-connect jdbc:hsqldb:hsql://ip-172-31-91-95.ec2.internal:16000/sqoop
+
+sqoop job --show extract_member_score --meta-connect jdbc:hsqldb:hsql://ip-172-31-91-95.ec2.internal:16000/sqoop
+
+## Check if sqoop jobs are getting executed
+
+sqoop job --exec extract_card_member --meta-connect jdbc:hsqldb:hsql://ip-172-31-91-95.ec2.internal:16000/sqoop
+
+sqoop job --exec extract_member_score --meta-connect jdbc:hsqldb:hsql://ip-172-31-91-95.ec2.internal:16000/sqoop
+
+-------------------------------- Sqoop Commands : End -----------------------------------------------
+
+-------------------------------- OOZIE Setup : Start -----------------------------------------------
+
+## Update OOZIE shared library and copy various needed files so oozie workflow can execute sqoop and hive actions
+
+## Login as root
+
+sudo su -
+
+## Login as hdfs
+
+su - hdfs
+
+## Export OOZIE_URL
+
+export OOZIE_URL=http://ip-172-31-91-95.ec2.internal:11000/oozie
+
+## Check oozie shared library for sqoop
+
+oozie admin -shareliblist sqoop
+
+## Start updating oozie shared library
+
+oozie admin -sharelibupdate
+[ShareLib update status]
+        sharelibDirOld = hdfs://ip-172-31-91-95.ec2.internal:8020/user/oozie/share/lib/lib_20180731033840
+        host = http://ec2-54-208-194-25.compute-1.amazonaws.com:11000/oozie
+        sharelibDirNew = hdfs://ip-172-31-91-95.ec2.internal:8020/user/oozie/share/lib/lib_20180731033840
+        status = Successful
+
+## Find mysql connector jar
+
+find / -name mysql*jar
+
+## Above command found mysql connector jar at this location - /var/lib/oozie/mysql-connector-java.jar
+
+## Copy mysql connector jar to oozie shared lib location for sqoop, change ownership to oozie and provide necessary permissions
+
+hadoop fs -put /var/lib/oozie/mysql-connector-java.jar /user/oozie/share/lib/lib_20180731033840/sqoop/.
+hadoop fs -chown oozie /user/oozie/share/lib/lib_20180731033840/sqoop/mysql-connector-java.jar
+hadoop fs -chmod 775 /user/oozie/share/lib/lib_20180731033840/sqoop/mysql-connector-java.jar
+
+## Check oozie shared library for hive
+
+oozie admin -shareliblist hive
+
+## Copy hive-site.xml to oozie shared lib location for hive, change ownership to oozie and provide necessary permissions
+
+hadoop fs -put /etc/hive/conf/hive-site.xml /user/oozie/share/lib/lib_20180731033840/hive/.
+hadoop fs -chown oozie /user/oozie/share/lib/lib_20180731033840/hive/hive-site.xml
+hadoop fs -chmod 775 /user/oozie/share/lib/lib_20180731033840/hive/hive-site.xml
+
+## Copy hbase-site.xml to oozie shared lib location for hive, change ownership to oozie and provide necessary permissions
+
+hadoop fs -put /etc/hbase/conf/hbase-site.xml /user/oozie/share/lib/lib_20180731033840/hive/.
+hadoop fs -chown oozie /user/oozie/share/lib/lib_20180731033840/hive/hbase-site.xml
+hadoop fs -chmod 775 /user/oozie/share/lib/lib_20180731033840/hive/hbase-site.xml
+
+## Copy metrics-core-2.2.0.jar to oozie shared lib location for hive, change ownership to oozie and provide necessary permissions
+
+hadoop fs -put /opt/cloudera/parcels/CDH/jars/metrics-core-2.2.0.jar /user/oozie/share/lib/lib_20180731033840/hive/.
+hadoop fs -chown oozie /user/oozie/share/lib/lib_20180731033840/hive/metrics-core-2.2.0.jar
+hadoop fs -chmod 775 /user/oozie/share/lib/lib_20180731033840/hive/metrics-core-2.2.0.jar
+
+## Copy hive-hbase-handler-1.1.0-cdh5.15.0.jar to oozie shared lib location for hive, change ownership to oozie and provide necessary permissions
+
+hadoop fs -put /opt/cloudera/parcels/CDH/jars/hive-hbase-handler-1.1.0-cdh5.15.0.jar /user/oozie/share/lib/lib_20180731033840/hive/.
+hadoop fs -chown oozie /user/oozie/share/lib/lib_20180731033840/hive/hive-hbase-handler-1.1.0-cdh5.15.0.jar
+hadoop fs -chmod 775 /user/oozie/share/lib/lib_20180731033840/hive/hive-hbase-handler-1.1.0-cdh5.15.0.jar
+
+## Copy all hbase related jars to oozie shared lib location for hive, change ownership to oozie and provide necessary permissions
+
+for i in `ls /opt/cloudera/parcels/CDH/jars/hbase* | grep -v test`; do hadoop fs -put $i /user/oozie/share/lib/lib_20180731033840/hive/.; done
+hadoop fs -chown oozie /user/oozie/share/lib/lib_20180731033840/hive/hbase*
+hadoop fs -chmod 775 /user/oozie/share/lib/lib_20180731033840/hive/hbase*
+
+## Finish updating oozie shared library
+
+oozie admin -sharelibupdate
+[ShareLib update status]
+        sharelibDirOld = hdfs://ip-172-31-91-95.ec2.internal:8020/user/oozie/share/lib/lib_20180731033840
+        host = http://ec2-54-208-194-25.compute-1.amazonaws.com:11000/oozie
+        sharelibDirNew = hdfs://ip-172-31-91-95.ec2.internal:8020/user/oozie/share/lib/lib_20180731033840
+        status = Successful
+
+## Update sqoop-site.xml
+
+/etc/sqoop/conf/sqoop-site.xml
+
+Add these properties within configuration tag as per mentioned by Shobit in this discussion forum link: https://learn.upgrad.com/v/course/119/question/123148
+
+<configuration>
+        <property>
+                <name>sqoop.metastore.client.autoconnect.url</name>
+                <value>jdbc:hsqldb:hsql://ip-172-31-91-95.ec2.internal:16000/sqoop</value>
+                <description>The connect string to use when connecting to a
+                        job-management metastore. If unspecified, uses ~/.sqoop/.
+                        You can specify a different path here.
+                </description>
+        </property>
+
+        <property>
+                <name>sqoop.metastore.client.record.password</name>
+                <value>true</value>
+                <description>If true, allow saved passwords in the metastore.
+                </description>
+        </property>
+</configuration>
+
+
+## Create directory in HDFS for oozie workflow
+
+hadoop fs -mkdir -p /capstone_project/oozie_workflow/app
+
+## Put sqoop-site.xml in oozie workflow application location
+
+hadoop fs -put /etc/sqoop/conf/sqoop-site.xml /capstone_project/oozie_workflow/app/.
+
+## Put workflow.xml in oozie workflow application location
+
+hadoop fs -put workflow.xml /capstone_project/oozie_workflow/app/.
+
+## Put lookupDataRefresh.hql in oozie workflow application location
+
+hadoop fs -put lookupDataRefresh.hql /capstone_project/oozie_workflow/app/.
+
+## Put coordinator.xml in oozie workflow location
+
+hadoop fs -put coordinator.xml /capstone_project/oozie_workflow/.
+
+-------------------------------- OOZIE Setup : End -----------------------------------------------
+
+-------------------------------- OOZIE Workflow Execution : Start -----------------------------------------------
+
+## Copy job.properties.withoutcoordinator as job.properties
+
+cp job.properties.withoutcoordinator job.properties
+
+## Run oozie job without coordinator
+
+oozie job -oozie http://ip-172-31-91-95.ec2.internal:11000/oozie -config job.properties -run
+
+## Wait for oozie job completion (job id was returned by previous command)
+
+oozie job -oozie http://ip-172-31-91-95.ec2.internal:11000/oozie -info 0000000-190525051149972-oozie-oozi-W
+
+## Copy job.properties.withcoordinator as job.properties
+
+cp job.properties.withcoordinator job.properties
+
+## Run oozie job with coordinator
+
+oozie job -oozie http://ip-172-31-91-95.ec2.internal:11000/oozie -config job.properties -run
+
+## Verify oozie job (job id was returned by previous command)
+
+oozie job -oozie http://ip-172-31-91-95.ec2.internal:11000/oozie -info 0000002-190525051149972-oozie-oozi-C
+
+-------------------------------- OOZIE Workflow Execution : End -----------------------------------------------
+
+-------------------------------- HBase Commands : Start -----------------------------------------------
+
+-- Once oozie jobs are successful, check data in HBase lookup_data_hive table
+
+scan 'lookup_data_hive', {VERSIONS=>10}
+
+-- Check data for a particular card_id, see multiple versions for postcode and transaction_dt
+
+get 'lookup_data_hive', '6599900931314251', {COLUMN => ['lookup_transaction_family:postcode', 'lookup_transaction_family:transaction_dt'], VERSIONS=>10}
+
+-- Check data for a particular card_id, verify that there should not be any multiple versions for ucl and score
+
+get 'lookup_data_hive', '6599900931314251', {COLUMN => ['lookup_card_family:ucl', 'lookup_card_family:score'], VERSIONS=>10}
+
+-- Check data for a particular card_id
+
+get 'lookup_data_hive', '6599900931314251'
+
+-------------------------------- HBase Commands : End -----------------------------------------------

@@ -1,0 +1,67 @@
+<workflow-app name="capstone_project_wf" xmlns="uri:oozie:workflow:0.4">
+
+    <start to="extract_card_member"/>
+
+    <action name="extract_card_member">
+        <sqoop xmlns="uri:oozie:sqoop-action:0.2">
+            <job-tracker>${jobTracker}</job-tracker>
+            <name-node>${nameNode}</name-node>
+            <job-xml>sqoop-site.xml</job-xml>
+            <configuration>
+                <property>
+                    <name>fs.hdfs.impl.disable.cache</name>
+                    <value>true</value>
+                </property>
+                <property>
+                    <name>mapred.job.queue.name</name>
+                    <value>${queueName}</value>
+                </property>
+        </configuration>
+            <command>job --exec extract_card_member --meta-connect jdbc:hsqldb:hsql://ip-172-31-91-95.ec2.internal:16000/sqoop</command>
+        </sqoop>
+
+        <ok to="extract_member_score"/>
+        <error to="kill_node"/>
+    </action>
+
+    <action name="extract_member_score">
+        <sqoop xmlns="uri:oozie:sqoop-action:0.2">
+            <job-tracker>${jobTracker}</job-tracker>
+            <name-node>${nameNode}</name-node>
+            <job-xml>sqoop-site.xml</job-xml>
+            <configuration>
+                <property>
+                    <name>fs.hdfs.impl.disable.cache</name>
+                    <value>true</value>
+                </property>
+                <property>
+                    <name>mapred.job.queue.name</name>
+                    <value>${queueName}</value>
+                </property>
+        </configuration>
+            <command>job --exec extract_member_score --meta-connect jdbc:hsqldb:hsql://ip-172-31-91-95.ec2.internal:16000/sqoop</command>
+        </sqoop>
+
+        <ok to="lookup_data_refresh"/>
+        <error to="kill_node"/>
+    </action>
+
+    <action name="lookup_data_refresh">
+        <hive xmlns="uri:oozie:hive-action:0.2">
+            <job-tracker>${jobTracker}</job-tracker>
+            <name-node>${nameNode}</name-node>
+            <script>${lookupScript}</script>
+        </hive>
+
+        <ok to="finish"/>
+        <error to="kill_node"/>
+    </action>
+
+    <kill name="kill_node">
+         <message>Your job failed!</message>
+    </kill>
+
+    <end name="finish"/>
+
+</workflow-app>
+
