@@ -1,0 +1,118 @@
+1. Script to load the data and create table/s in the NoSQL database.
+
+-------------------------------- Hive Commands : Start -----------------------------------------------
+
+-- First create new database namely capstone_project
+
+create database capstone_project;
+use capstone_project;
+
+-- Set some parameters for hive session
+
+set hive.auto.convert.join=false;
+set hive.stats.autogather=true;
+set orc.compress=SNAPPY;
+set hive.exec.compress.output=true;
+set mapred.output.compression.codec=org.apache.hadoop.io.compress.SnappyCodec;
+set mapred.output.compression.type=BLOCK;
+set mapreduce.map.java.opts=-Xmx5G;
+set mapreduce.reduce.java.opts=-Xmx5G;
+set mapred.child.java.opts=-Xmx5G -XX:+UseConcMarkSweepGC -XX:-UseGCOverheadLimit;
+
+-- Create external table card_transactions_ext table which will point to HDFS location
+
+CREATE EXTERNAL TABLE IF NOT EXISTS CARD_TRANSACTIONS_EXT(
+`CARD_ID` STRING,
+`MEMBER_ID` STRING,
+`AMOUNT` DOUBLE,
+`POSTCODE` STRING,
+`POS_ID` STRING,
+`TRANSACTION_DT` STRING,
+`STATUS` STRING)
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ','
+LOCATION '/capstone_project/card_transactions'
+TBLPROPERTIES ("skip.header.line.count"="1");
+
+-- Create table card_transactions_orc
+
+CREATE TABLE IF NOT EXISTS CARD_TRANSACTIONS_ORC(
+`CARD_ID` STRING,
+`MEMBER_ID` STRING,
+`AMOUNT` DOUBLE,
+`POSTCODE` STRING,
+`POS_ID` STRING,
+`TRANSACTION_DT` TIMESTAMP,
+`STATUS` STRING)
+STORED AS ORC
+TBLPROPERTIES ("orc.compress"="SNAPPY");
+
+-- Load data in card_transactions_orc while casting timestamp format for transaction_dt column
+
+INSERT OVERWRITE TABLE CARD_TRANSACTIONS_ORC
+SELECT CARD_ID, MEMBER_ID, AMOUNT, POSTCODE, POS_ID, CAST(FROM_UNIXTIME(UNIX_TIMESTAMP(TRANSACTION_DT,'dd-MM-yyyy HH:mm:ss')) AS TIMESTAMP), STATUS
+FROM CARD_TRANSACTIONS_EXT;
+
+-- Verify transaction_dt and year in card_transactions_orc
+
+select year(transaction_dt), transaction_dt from card_transactions_orc limit 10;
+
+-- Create card_transactions_hbase hive-hbase integrated table which will be visible in HBase as well
+
+CREATE TABLE CARD_TRANSACTIONS_HBASE(
+`TRANSACTION_ID` STRING, 
+`CARD_ID` STRING,
+`MEMBER_ID` STRING,
+`AMOUNT` DOUBLE,
+`POSTCODE` STRING,
+`POS_ID` STRING,
+`TRANSACTION_DT` TIMESTAMP,
+`STATUS` STRING)
+ROW FORMAT DELIMITED
+STORED BY 'org.apache.hadoop.hive.hbase.HBaseStorageHandler'
+WITH SERDEPROPERTIES
+("hbase.columns.mapping"=":key, card_transactions_family:card_id, card_transactions_family:member_id, card_transactions_family:amount, card_transactions_family:postcode, card_transactions_family:pos_id, card_transactions_family:transaction_dt, card_transactions_family:status")
+TBLPROPERTIES ("hbase.table.name"="card_transactions_hive");
+
+-- Load data in card_transactions_hbase which will be visible in HBase as well
+
+INSERT OVERWRITE TABLE CARD_TRANSACTIONS_HBASE
+SELECT
+reflect('java.util.UUID', 'randomUUID') as TRANSACTION_ID, CARD_ID, MEMBER_ID, AMOUNT, POSTCODE, POS_ID, TRANSACTION_DT, STATUS
+FROM CARD_TRANSACTIONS_ORC;
+
+-- Check some data in card_transactions_hbase
+
+select * from card_transactions_hbase limit 10;
+
+-- Create lookup_data_hbase hive-hbase integrated table which will be visible in HBase as well
+
+CREATE TABLE LOOKUP_DATA_HBASE(`CARD_ID` STRING,`UCL` DOUBLE, `SCORE` INT, `POSTCODE` STRING, `TRANSACTION_DT` TIMESTAMP)
+STORED BY 'org.apache.hadoop.hive.hbase.HBaseStorageHandler'
+WITH SERDEPROPERTIES ("hbase.columns.mapping"=":key, lookup_card_family:ucl, lookup_card_family:score, lookup_transaction_family:postcode, lookup_transaction_family:transaction_dt")
+TBLPROPERTIES ("hbase.table.name" = "lookup_data_hive");
+
+-------------------------------- Hive Commands : End -----------------------------------------------
+
+-------------------------------- HBase Commands : Start --------------------------------------------
+
+-- In HBase, check details of card_transactions_hive hive-hbase integrated table
+
+describe 'card_transactions_hive'
+
+-- In HBase, check count in card_transactions_hive in HBase
+
+count 'card_transactions_hive'
+
+-- In HBase, check details of lookup_data_hive hive-hbase integrated table
+
+describe 'lookup_data_hive'
+
+-- In HBase, alter lookup_data_hive table and set VERSIONS to 10 for lookup_transaction_family
+
+alter 'lookup_data_hive', {NAME => 'lookup_transaction_family', VERSIONS => 10}
+
+-- In HBase, check details of lookup_data_hive and confirm that VERSIONS is set to 10 for lookup_transaction_family
+
+describe 'lookup_data_hive'
+
+-------------------------------- HBase Commands : End --------------------------------------------
