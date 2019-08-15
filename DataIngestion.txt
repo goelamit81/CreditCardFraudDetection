@@ -1,0 +1,76 @@
+2. Script to ingest the relevant data from AWS RDS to Hadoop.
+
+-------------------------------- Sqoop Commands : Start -----------------------------------------------
+
+## Sqoop command to import member_score table from RDS into HDFS
+
+sqoop import --connect jdbc:mysql://upgradawsrds.cpclxrkdvwmz.us-east-1.rds.amazonaws.com:3306/cred_financials_data --username upgraduser --password upgraduser --table member_score --null-string 'NA' --null-non-string '\\N' --delete-target-dir --target-dir '/capstone_project/member_score'
+
+## Sqoop command to import card_member table from RDS into HDFS
+
+sqoop import --connect jdbc:mysql://upgradawsrds.cpclxrkdvwmz.us-east-1.rds.amazonaws.com:3306/cred_financials_data --username upgraduser --password upgraduser --table card_member --null-string 'NA' --null-non-string '\\N' --delete-target-dir --target-dir '/capstone_project/card_member'
+
+-------------------------------- Sqoop Commands : End -----------------------------------------------
+
+-------------------------------- Hive Commands : Start -----------------------------------------------
+
+-- Create external table card_member_ext which will point to HDFS location
+
+CREATE EXTERNAL TABLE IF NOT EXISTS CARD_MEMBER_EXT(
+`CARD_ID` STRING,
+`MEMBER_ID` STRING,
+`MEMBER_JOINING_DT` TIMESTAMP,
+`CARD_PURCHASE_DT` STRING,
+`COUNTRY` STRING,
+`CITY` STRING)
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ','
+LOCATION '/capstone_project/card_member';
+
+-- Create external table member_score_ext which will point to HDFS location
+
+CREATE EXTERNAL TABLE IF NOT EXISTS MEMBER_SCORE_EXT(
+`MEMBER_ID` STRING,
+`SCORE` INT)
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ','
+LOCATION '/capstone_project/member_score';
+
+-- Create card_member_orc table
+
+CREATE TABLE IF NOT EXISTS CARD_MEMBER_ORC(
+`CARD_ID` STRING,
+`MEMBER_ID` STRING,
+`MEMBER_JOINING_DT` TIMESTAMP,
+`CARD_PURCHASE_DT` STRING,
+`COUNTRY` STRING,
+`CITY` STRING)
+STORED AS ORC
+TBLPROPERTIES ("orc.compress"="SNAPPY");
+
+-- Create member_score_orc table
+
+CREATE TABLE IF NOT EXISTS MEMBER_SCORE_ORC(
+`MEMBER_ID` STRING,
+`SCORE` INT)
+STORED AS ORC 
+TBLPROPERTIES ("orc.compress"="SNAPPY");
+
+-- Load data into card_member_orc
+
+INSERT OVERWRITE TABLE CARD_MEMBER_ORC
+SELECT CARD_ID, MEMBER_ID, MEMBER_JOINING_DT, CARD_PURCHASE_DT, COUNTRY, CITY FROM CARD_MEMBER_EXT;
+
+-- Load data into member_score_orc
+
+INSERT OVERWRITE TABLE MEMBER_SCORE_ORC
+SELECT MEMBER_ID, SCORE FROM MEMBER_SCORE_EXT;
+
+-- Verify some data in card_member_orc table.
+
+SELECT * FROM CARD_MEMBER_ORC LIMIT 10;
+
+-- Verify some data in member_score_orc table.
+
+SELECT * FROM MEMBER_SCORE_ORC LIMIT 10;
+
+
+-------------------------------- Hive Commands : End -----------------------------------------------
